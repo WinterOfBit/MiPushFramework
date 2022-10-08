@@ -3,8 +3,9 @@ package top.trumeet.mipushframework.utils;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import androidx.annotation.NonNull;
 import android.util.Log;
+
+import androidx.annotation.NonNull;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -76,7 +77,7 @@ public class MiPushManifestChecker {
             if (!isIllegalManifestException(e)) {
                 Log.e(TAG, "checkServices", e);
             } else {
-                Log.w(TAG, "checkServices: " + packageInfo.packageName + "," + ((InvocationTargetException) e).getCause().getMessage());
+//                Log.w(TAG, "checkServices: " + packageInfo.packageName + "," + ((InvocationTargetException) e).getCause().getMessage());
             }
             return false;
         }

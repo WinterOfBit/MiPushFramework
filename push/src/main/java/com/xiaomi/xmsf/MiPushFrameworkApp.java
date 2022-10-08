@@ -68,6 +68,7 @@ public class MiPushFrameworkApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+
         RxActivityResult.register(this);
 
         LogUtils.init(this);
@@ -92,10 +93,11 @@ public class MiPushFrameworkApp extends Application {
         if (isAppMainProc(this)) {
             if ((currentTimeMillis - lastStartupTime > 300000 || currentTimeMillis - lastStartupTime < 0)) {
                 setStartupTime(currentTimeMillis);
-                MiuiPushActivateService.awakePushActivateService(PushControllerUtils.wrapContext(this)
+                MiuiPushActivateService.awakePushActivateService(wrapContext(this)
                         , "com.xiaomi.xmsf.push.SCAN");
             }
         }
+
 
         NotificationController.deleteOldNotificationChannelGroup(this);
 
@@ -172,11 +174,14 @@ public class MiPushFrameworkApp extends Application {
     }
 
     private void initPushLogger() {
-        Logger.setLogger(PushControllerUtils.wrapContext(this), buildMiSDKLogger());
+        Logger.setLogger(wrapContext(this), buildMiSDKLogger());
     }
 
     private void initMiSdkLogger() {
         MyLog.setLogger(buildMiSDKLogger());
+        if (SystemUtils.isDebuggable(this)) {
+            MyLog.setLogLevel(MyLog.INFO);
+        }
     }
 
 

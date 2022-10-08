@@ -1,5 +1,7 @@
 package com.xiaomi.xmsf.push.control;
 
+import static top.trumeet.common.Constants.TAG_CONDOM;
+
 import android.annotation.SuppressLint;
 import android.app.ActivityManager;
 import android.app.job.JobScheduler;
@@ -8,27 +10,28 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.IBinder;
 import android.os.Process;
 import android.preference.PreferenceManager;
+
 import androidx.core.content.ContextCompat;
 
 import com.elvishew.xlog.Logger;
 import com.elvishew.xlog.XLog;
 import com.oasisfeng.condom.CondomContext;
+import com.xiaomi.channel.commonutils.reflect.JavaCalls;
 import com.xiaomi.mipush.sdk.MiPushClient;
+import com.xiaomi.mipush.sdk.PushServiceClient;
 import com.xiaomi.push.service.PushServiceConstants;
 import com.xiaomi.push.service.PushServiceMain;
 import com.xiaomi.xmsf.push.service.receivers.BootReceiver;
 import com.xiaomi.xmsf.push.service.receivers.KeepAliveReceiver;
 
 import top.trumeet.common.Constants;
-
-import static top.trumeet.common.Constants.APP_ID;
-import static top.trumeet.common.Constants.APP_KEY;
-import static top.trumeet.common.Constants.TAG_CONDOM;
 
 /**
  * Created by Trumeet on 2017/8/25.
@@ -101,7 +104,29 @@ public class PushControllerUtils {
 
 
             if (isAppMainProc(context)) {
-                MiPushClient.registerPush(wrapContext(context), APP_ID, APP_KEY);
+                Intent var1 = JavaCalls.callMethod(PushServiceClient.getInstance(wrapContext(context)), "createServiceIntent");
+                ServiceConnection var3 = new ServiceConnection() {
+                    public void onServiceConnected(ComponentName param1, IBinder param2) {
+                        logger.d("onServiceConnected");
+                    }
+
+                    public void onServiceDisconnected(ComponentName var1) {
+                        logger.d("onServiceDisconnected");
+
+                    }
+                };
+                wrapContext(context).bindService(var1, var3, 1);
+
+//                while (pushRegistered(context)) {
+//                    PushServiceClient.getInstance(wrapContext(context)).awakePushService();
+//
+//                    logger.d("begin");
+//                    MiPushClient.registerPush(wrapContext(context), APP_ID, APP_KEY);
+//                    logger.d("end");
+////                Log.d(TAG, "regid:" + MiPushClient.getRegId(this));
+//                    SystemClock.sleep(8000);
+//
+//                }
             }
 
             try {
@@ -138,6 +163,12 @@ public class PushControllerUtils {
             }
             context.stopService(new Intent(context, PushServiceMain.class));
         }
+    }
+
+    public static boolean pushRegistered(Context context) {
+        boolean registered = MiPushClient.getRegId(wrapContext(context)) != null;
+        logger.d("pushRegistered: " + registered);
+        return registered;
     }
 
     /**

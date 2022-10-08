@@ -1,5 +1,6 @@
 package com.xiaomi.push.service;
 
+import static com.xiaomi.push.service.MIPushNotificationHelper.getTargetPackage;
 import static com.xiaomi.push.service.MIPushNotificationHelper.isBusinessMessage;
 import static top.trumeet.common.utils.NotificationUtils.getExtraField;
 
@@ -62,8 +63,9 @@ public class MyMIPushNotificationHelper {
 
     /**
      * @see MIPushNotificationHelper#notifyPushMessage
+     * XMPushService pushService, String realTargetPackage, byte[] decryptedContent
      */
-    public static void notifyPushMessage(Context xmPushService, XmPushActionContainer buildContainer, byte[] payload, long var2) {
+    public static MIPushNotificationHelper.NotifyPushMessageInfo notifyPushMessage(Context pushService, XmPushActionContainer buildContainer, byte[] decryptedContent) {
         PushMetaInfo metaInfo = buildContainer.getMetaInfo();
         String packageName = buildContainer.getPackageName();
 
@@ -72,30 +74,34 @@ public class MyMIPushNotificationHelper {
             boolean success = false;
             Handler handler = new Handler(Looper.getMainLooper());
             try {
-                 success = Configurations.getInstance().init(xmPushService,
-                        ConfigCenter.getInstance().getConfigurationDirectory(xmPushService));
+                 success = Configurations.getInstance().init(pushService,
+                        ConfigCenter.getInstance().getConfigurationDirectory(pushService));
             } catch (Exception e) {
-                handler.post(() -> Toast.makeText(xmPushService, e.toString(), Toast.LENGTH_LONG).show());
+                handler.post(() -> Toast.makeText(pushService, e.toString(), Toast.LENGTH_LONG).show());
             }
             boolean finalSuccess = success;
-            handler.post(() -> Toast.makeText(xmPushService, "configurations loaded: " + finalSuccess, Toast.LENGTH_SHORT).show());
+            handler.post(() -> Toast.makeText(pushService, "configurations loaded: " + finalSuccess, Toast.LENGTH_SHORT).show());
         }
 
         try {
             Set<String> operations = Configurations.getInstance().handle(packageName, metaInfo);
 
             if (operations.contains(Configurations.PackageConfig.OPERATION_WAKE)) {
-                wakeScreen(xmPushService, packageName);
+                wakeScreen(pushService, packageName);
             }
             if (!operations.contains(Configurations.PackageConfig.OPERATION_IGNORE)) {
-                doNotifyPushMessage(xmPushService, buildContainer, payload);
+                doNotifyPushMessage(pushService, buildContainer, decryptedContent);
             }
             if (operations.contains(Configurations.PackageConfig.OPERATION_OPEN)) {
-                MyPushMessageHandler.startService(xmPushService, buildContainer, payload);
+                MyPushMessageHandler.startService(pushService, buildContainer, decryptedContent);
             }
         } catch (Exception e) {
             logger.e(e.getLocalizedMessage(), e);
         }
+        MIPushNotificationHelper.NotifyPushMessageInfo info = new MIPushNotificationHelper.NotifyPushMessageInfo();
+        info.targetPkgName = getTargetPackage(buildContainer);
+        info.traffic = 0;
+        return info;
     }
 
     private static void wakeScreen(Context context, String sourcePackage) {
