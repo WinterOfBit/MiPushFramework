@@ -1,6 +1,7 @@
 package com.xiaomi.xmsf;
 
 import static com.xiaomi.xmsf.push.control.PushControllerUtils.isAppMainProc;
+import static com.xiaomi.xmsf.push.control.PushControllerUtils.wrapContext;
 import static com.xiaomi.xmsf.push.notification.NotificationController.CHANNEL_WARN;
 import static top.trumeet.common.Constants.TAG_CONDOM;
 
@@ -13,6 +14,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.os.Handler;
 
 import androidx.core.app.NotificationChannelCompat;
 import androidx.core.app.NotificationChannelGroupCompat;
@@ -22,14 +24,18 @@ import androidx.core.app.NotificationManagerCompat;
 import com.elvishew.xlog.XLog;
 import com.oasisfeng.condom.CondomOptions;
 import com.oasisfeng.condom.CondomProcess;
+import com.xiaomi.channel.commonutils.android.SystemUtils;
 import com.xiaomi.channel.commonutils.logger.LoggerInterface;
 import com.xiaomi.channel.commonutils.logger.MyLog;
+import com.xiaomi.channel.commonutils.misc.ScheduledJobManager;
 import com.xiaomi.mipush.sdk.Logger;
 import com.xiaomi.xmsf.push.control.PushControllerUtils;
 import com.xiaomi.xmsf.push.control.XMOutbound;
 import com.xiaomi.xmsf.push.notification.NotificationController;
 import com.xiaomi.xmsf.push.service.MiuiPushActivateService;
 import com.xiaomi.xmsf.utils.LogUtils;
+
+import java.util.Objects;
 
 import rx_activity_result2.RxActivityResult;
 import top.trumeet.common.Constants;
@@ -40,6 +46,18 @@ public class MiPushFrameworkApp extends Application {
     private com.elvishew.xlog.Logger logger;
 
     private static final String MIPUSH_EXTRA = "mipush_extra";
+
+    private static final int[] RetryInterval = {3600000, 7200000, 14400000, 28800000, 86400000};
+
+    public static void registerPush(MiPushFrameworkApp app, int i) {
+        Objects.requireNonNull(app);
+        int[] retryInterval = RetryInterval;
+        int length = retryInterval.length;
+        long intervalMs = i < length ? retryInterval[i] : retryInterval[length - 1];
+        MyLog.i("for make sure xmsf register push succ, schedule register after " + intervalMs / 1000 + " sec");
+        new Handler().postDelayed(new RetryRegister(app, i), intervalMs);
+    }
+
 
     @Override
     public void attachBaseContext(Context context) {
@@ -63,6 +81,10 @@ public class MiPushFrameworkApp extends Application {
                 false);
         CondomProcess.installExceptDefaultProcess(this, options);
 
+        if (isAppMainProc(this)) {
+            ScheduledJobManager.getInstance(wrapContext(this))
+                    .addOneShootJob(new FirstRegister(this, wrapContext(this)));
+        }
         PushControllerUtils.setAllEnable(true, this);
 
         long currentTimeMillis = System.currentTimeMillis();
