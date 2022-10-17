@@ -10,6 +10,7 @@ import static top.trumeet.common.utils.NotificationUtils.getGroupIdByPkg;
 import static top.trumeet.common.utils.NotificationUtils.getPackageName;
 
 import android.annotation.TargetApi;
+import android.app.AndroidAppHelper;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationChannelGroup;
@@ -32,6 +33,7 @@ import androidx.core.graphics.drawable.IconCompat;
 
 import com.elvishew.xlog.Logger;
 import com.elvishew.xlog.XLog;
+import com.xiaomi.channel.commonutils.reflect.JavaCalls;
 import com.xiaomi.push.service.MIPushNotificationHelper;
 import com.xiaomi.xmpush.thrift.PushMetaInfo;
 import com.xiaomi.xmpush.thrift.XmPushActionContainer;
@@ -61,6 +63,16 @@ public class NotificationController {
     public static final String CHANNEL_WARN = "warn";
 
     public static INotificationManager createNotificationManager(@NonNull Context context, @NonNull String packageName) {
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                NotificationManager nm = AndroidAppHelper.currentApplication().getSystemService(NotificationManager.class);
+                JavaCalls.callMethod(nm, "isSystemConditionProviderEnabled", IS_SYSTEM_HOOK_READY) as Boolean
+            }
+        } catch (t: Throwable) {
+            XLog.e(TAG, "isSystemHookReady error", t)
+            false
+        }
         return new NormalNotificationManager(context);
     }
 

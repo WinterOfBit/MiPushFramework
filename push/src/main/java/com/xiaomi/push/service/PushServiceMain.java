@@ -12,6 +12,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.util.Log;
 
 import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationChannelCompat;
@@ -97,6 +98,13 @@ public class PushServiceMain extends XMPushService {
             mNotificationRevival = new NotificationRevival(this, sbn -> sbn.getTag() == null);  // Only push notifications (tag == null)
             mNotificationRevival.initialize();
         }
+    }
+
+    @Override
+    public void onStart(Intent intent, int startId) {
+        super.onStart(intent, startId);
+        logger.d(intent);
+        logger.d(intent.getExtras().toString());
     }
 
     @Override
