@@ -244,6 +244,7 @@
     <string name="message_type_notification">通知消息</string>
     <string name="message_type_pass_through">透传消息</string>
     <string name="action_notify">通知</string>
+    <string name="xposedDescription">以目标应用身份发送通知</string>
 
 
 </resources>

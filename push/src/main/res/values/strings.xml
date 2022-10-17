@@ -263,6 +263,5 @@ This could be the application doing a reverse registration, or the registration 
     <string name="group_notifications_for_same_session_clear_title">clear all notifications of session when the notification of session was clicked</string>
     <string name="show_pass_through">show \"pass through\" message as notification</string>
     <string name="group_notifications_by_title_detail">This invalidates application-defined session concepts</string>
-
-
+    <string name="xposedDescription">Send notifications as the target application</string>
 </resources>
