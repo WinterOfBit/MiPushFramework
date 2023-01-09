@@ -4,17 +4,20 @@ import static top.trumeet.common.utils.NotificationUtils.EXTRA_CHANNEL_DESCRIPTI
 import static top.trumeet.common.utils.NotificationUtils.EXTRA_CHANNEL_ID;
 import static top.trumeet.common.utils.NotificationUtils.EXTRA_CHANNEL_NAME;
 import static top.trumeet.common.utils.NotificationUtils.EXTRA_SOUND_URL;
+import static top.trumeet.common.utils.NotificationUtils.EXTRA_SUB_TEXT;
 import static top.trumeet.common.utils.NotificationUtils.getChannelIdByPkg;
 import static top.trumeet.common.utils.NotificationUtils.getExtraField;
 import static top.trumeet.common.utils.NotificationUtils.getGroupIdByPkg;
-import static top.trumeet.common.utils.NotificationUtils.getPackageName;
+import static top.trumeet.common.utils.Utils.getApplication;
 
 import android.annotation.TargetApi;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationChannelGroup;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.BitmapFactory;
 import android.media.AudioAttributes;
@@ -22,7 +25,6 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.service.notification.StatusBarNotification;
-import android.text.TextUtils;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
@@ -32,14 +34,17 @@ import androidx.core.graphics.drawable.IconCompat;
 
 import com.elvishew.xlog.Logger;
 import com.elvishew.xlog.XLog;
+import com.nihility.notification.NotificationManagerEx;
 import com.xiaomi.push.service.MIPushNotificationHelper;
 import com.xiaomi.xmpush.thrift.PushMetaInfo;
 import com.xiaomi.xmpush.thrift.XmPushActionContainer;
+import com.xiaomi.xmsf.ManageSpaceActivity;
 import com.xiaomi.xmsf.R;
 import com.xiaomi.xmsf.utils.ColorUtil;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.Map;
 
 import top.trumeet.common.cache.ApplicationNameCache;
@@ -60,18 +65,13 @@ public class NotificationController {
 
     public static final String CHANNEL_WARN = "warn";
 
-    public static INotificationManager createNotificationManager(@NonNull Context context, @NonNull String packageName) {
-        return new NormalNotificationManager(context);
+    public static NotificationManagerEx getNotificationManagerEx() {
+        return NotificationManagerEx.INSTANCE;
     }
 
     public static void deleteOldNotificationChannelGroup(@NonNull Context context) {
-        try {
-            INotificationManager manager = new NormalNotificationManager(context);
-            manager.deleteNotificationChannelGroup(ID_GROUP_APPLICATIONS);
-        } catch (Exception ignore) {
-
-        }
-
+        getNotificationManagerEx().deleteNotificationChannelGroup(
+                getApplication().getPackageName(), ID_GROUP_APPLICATIONS);
     }
 
     @TargetApi(26)
@@ -114,40 +114,27 @@ public class NotificationController {
             return null;
         }
 
-        INotificationManager manager = createNotificationManager(context, packageName);
-
-        String channelId = getChannelId(metaInfo, packageName);
-        NotificationChannel notificationChannel = manager.getNotificationChannel(channelId);
-
-        if (notificationChannel != null) {
-            final boolean isValidGroup =
-                    !ID_GROUP_APPLICATIONS.equals(notificationChannel.getGroup()) &&
-                            !TextUtils.isEmpty(notificationChannel.getGroup());
-            if (isValidGroup) {
-                return notificationChannel;
-            }
-            manager.deleteNotificationChannel(channelId);
-        }
-
         CharSequence appName = ApplicationNameCache.getInstance().getAppName(context, packageName);
         if (appName == null) {
             return null;
         }
 
-        return createNotificationChannel(metaInfo, packageName, manager, appName);
+        return createNotificationChannel(metaInfo, packageName, appName);
 
     }
 
-    private static NotificationChannel createNotificationChannel(PushMetaInfo metaInfo, String packageName, INotificationManager manager, CharSequence appName) {
+    private static NotificationChannel createNotificationChannel(PushMetaInfo metaInfo, String packageName, CharSequence appName) {
         NotificationChannelGroup notificationChannelGroup = createGroupWithPackage(packageName, appName);
-        manager.createNotificationChannelGroup(notificationChannelGroup);
+        getNotificationManagerEx().createNotificationChannelGroups(
+                packageName, Arrays.asList(notificationChannelGroup));
 
         NotificationChannel notificationChannel = createChannelWithPackage(metaInfo, packageName);
         if (notificationChannel != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             notificationChannel.setGroup(notificationChannelGroup.getId());
         }
 
-        manager.createNotificationChannel(notificationChannel);
+        getNotificationManagerEx().createNotificationChannels(
+                packageName, Arrays.asList(notificationChannel));
         return notificationChannel;
     }
 
@@ -157,9 +144,8 @@ public class NotificationController {
         if (groupId == null) {
             return;
         }
-        INotificationManager manager = createNotificationManager(context, packageName);
-        if (!needGroupOfNotifications(manager, groupId)) {
-            manager.cancel(groupId.hashCode());
+        if (!needGroupOfNotifications(packageName, groupId)) {
+            getNotificationManagerEx().cancel(packageName, null, groupId.hashCode());
             return;
         }
 
@@ -169,18 +155,19 @@ public class NotificationController {
         builder.setCategory(Notification.CATEGORY_EVENT)
                 .setGroupSummary(true)
                 .setGroup(groupId);
-        notify(context, groupId.hashCode(), packageName, builder);
+        notify(context, groupId.hashCode(), packageName, builder, metaInfo);
     }
 
     @RequiresApi(api = Build.VERSION_CODES.M)
-    private static boolean needGroupOfNotifications(INotificationManager manager, String groupId) {
-        int notificationCntInGroup = getNotificationCountOfGroup(manager, groupId);
+    private static boolean needGroupOfNotifications(String packageName, String groupId) {
+        int notificationCntInGroup = getNotificationCountOfGroup(packageName, groupId);
         return notificationCntInGroup > 1;
     }
 
     @RequiresApi(api = Build.VERSION_CODES.M)
-    private static int getNotificationCountOfGroup(INotificationManager manager, String groupId) {
-        StatusBarNotification[] activeNotifications = manager.getActiveNotifications();
+    private static int getNotificationCountOfGroup(String packageName, String groupId) {
+        StatusBarNotification[] activeNotifications =
+                getNotificationManagerEx().getActiveNotifications(packageName);
 
 
         int notificationCntInGroup = 0;
@@ -203,14 +190,14 @@ public class NotificationController {
         notificationBuilder.setDefaults(Notification.DEFAULT_ALL);
         notificationBuilder.setPriority(Notification.PRIORITY_HIGH);
 
-        Notification notification = notify(context, notificationId, packageName, notificationBuilder);
+        Notification notification = notify(context, notificationId, packageName, notificationBuilder, metaInfo);
 
         updateSummaryNotification(context, metaInfo, packageName, notification.getGroup());
     }
 
-    private static Notification notify(Context context, int notificationId, String packageName, NotificationCompat.Builder notificationBuilder) {
-        INotificationManager manager = createNotificationManager(context, packageName);
-
+    private static Notification notify(
+            Context context, int notificationId, String packageName,
+            NotificationCompat.Builder notificationBuilder, PushMetaInfo metaInfo) {
         // Make the behavior consistent with official MIUI
         Bundle extras = new Bundle();
         extras.putString("target_package", packageName);
@@ -219,11 +206,11 @@ public class NotificationController {
         // Set small icon
         NotificationController.processSmallIcon(context, packageName, notificationBuilder);
 
-        // Fill app name
-        NotificationController.buildExtraSubText(context, packageName, notificationBuilder);
+        String subText = getExtraField(metaInfo.getExtra(), EXTRA_SUB_TEXT, null);
+        NotificationController.buildExtraSubText(context, packageName, notificationBuilder, subText);
 
         Notification notification = notificationBuilder.build();
-        manager.notify(notificationId, notification);
+        getNotificationManagerEx().notify(packageName, null, notificationId, notification);
         return notification;
     }
 
@@ -242,12 +229,10 @@ public class NotificationController {
 
     public static void cancel(Context context, XmPushActionContainer container,
                               int notificationId, String notificationGroup, boolean clearGroup) {
-        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-
-        manager.cancel(notificationId);
+        getNotificationManagerEx().cancel(container.getPackageName(), null, notificationId);
 
         if (clearGroup) {
-            manager.cancel(notificationGroup.hashCode());
+            getNotificationManagerEx().cancel(container.getPackageName(), null, notificationGroup.hashCode());
             return;
         }
 
@@ -318,21 +303,21 @@ public class NotificationController {
         }
     }
 
-
-    public static void buildExtraSubText(Context context, String packageName, NotificationCompat.Builder localBuilder) {
-        CharSequence appName = ApplicationNameCache.getInstance().getAppName(context, packageName);
+    public static void buildExtraSubText(Context context, String packageName, NotificationCompat.Builder localBuilder, CharSequence text) {
+        if (text == null) {
+            text = ApplicationNameCache.getInstance().getAppName(context, packageName);
+        }
         int color = getIconColor(context, packageName);
         if (color == Notification.COLOR_DEFAULT) {
-            localBuilder.setSubText(appName);
+            localBuilder.setSubText(text);
             return;
         }
         localBuilder.setColor(color);
-        CharSequence subText = ColorUtil.createColorSubtext(appName, color);
+        CharSequence subText = ColorUtil.createColorSubtext(text, color);
         if (subText != null) {
             localBuilder.setSubText(subText);
         }
     }
-
 
     private static int getIconId(Context context, String packageName, String resourceName) {
         return context.getResources().getIdentifier(resourceName, "drawable", packageName);
@@ -353,6 +338,18 @@ public class NotificationController {
         localBuilder.setStyle(style);
         localBuilder.setWhen(System.currentTimeMillis());
         localBuilder.setShowWhen(true);
+
+        Intent notifyIntent = new Intent(context, ManageSpaceActivity.class);
+        // Set the Activity to start in a new, empty task
+        notifyIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        // Create the PendingIntent
+        PendingIntent notifyPendingIntent = PendingIntent.getActivity(
+                context, 0, notifyIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
+        localBuilder.setContentIntent(notifyPendingIntent);
 
         NotificationController.publish(context, new PushMetaInfo(), id, packageName, localBuilder);
     }

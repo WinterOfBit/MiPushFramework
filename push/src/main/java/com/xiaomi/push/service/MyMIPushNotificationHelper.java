@@ -13,8 +13,6 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.os.PowerManager;
 import android.text.TextUtils;
 import android.widget.Toast;
@@ -43,6 +41,7 @@ import java.util.Set;
 import top.trumeet.common.Constants;
 import top.trumeet.common.db.RegisteredApplicationDb;
 import top.trumeet.common.register.RegisteredApplication;
+import top.trumeet.common.utils.Utils;
 
 /**
  * @author zts1993
@@ -80,15 +79,13 @@ public class MyMIPushNotificationHelper {
             if (!tryLoadConfigurations) {
                 tryLoadConfigurations = true;
                 boolean success = false;
-                Handler handler = new Handler(Looper.getMainLooper());
                 try {
                     success = Configurations.getInstance().init(context,
                             ConfigCenter.getInstance().getConfigurationDirectory(context));
                 } catch (Exception e) {
-                    handler.post(() -> Toast.makeText(context, e.toString(), Toast.LENGTH_LONG).show());
+                    Utils.makeText(context, e.toString(), Toast.LENGTH_LONG);
                 }
-                boolean finalSuccess = success;
-                handler.post(() -> Toast.makeText(context, "configurations loaded: " + finalSuccess, Toast.LENGTH_SHORT).show());
+                Utils.makeText(context, "configurations loaded: " + success, Toast.LENGTH_SHORT);
             }
 
             try {
@@ -238,7 +235,6 @@ public class MyMIPushNotificationHelper {
                 PendingIntent pendingIntent = PendingIntent.getActivity(xmPushService, 0, sdkIntentJump, PendingIntent.FLAG_UPDATE_CURRENT);
                 localBuilder.addAction(new NotificationCompat.Action(i, "SDK Intent", pendingIntent));
             }
-
         }
     }
 
@@ -409,24 +405,26 @@ public class MyMIPushNotificationHelper {
         if (paramPushMetaInfo == null) {
             return null;
         }
-        PendingIntent localPendingIntent;
 
+        Intent localIntent;
         if (isBusinessMessage(paramXmPushActionContainer)) {
-            Intent localIntent = new Intent();
+            localIntent = new Intent();
             localIntent.setComponent(new ComponentName("com.xiaomi.xmsf", "com.xiaomi.mipush.sdk.PushMessageHandler"));
             localIntent.putExtra(PushConstants.MIPUSH_EXTRA_PAYLOAD, paramArrayOfByte);
             localIntent.putExtra(FROM_NOTIFICATION, true);
             localIntent.addCategory(String.valueOf(paramPushMetaInfo.getNotifyId()));
-            localPendingIntent = PendingIntent.getService(paramContext, 0, localIntent, PendingIntent.FLAG_UPDATE_CURRENT);
         } else {
-            Intent localIntent = new Intent("com.xiaomi.mipush.RECEIVE_MESSAGE");
+            localIntent = new Intent(PushConstants.MIPUSH_ACTION_NEW_MESSAGE);
             localIntent.setComponent(new ComponentName(paramXmPushActionContainer.packageName, "com.xiaomi.mipush.sdk.PushMessageHandler"));
             localIntent.putExtra(PushConstants.MIPUSH_EXTRA_PAYLOAD, paramArrayOfByte);
             localIntent.putExtra(FROM_NOTIFICATION, true);
             localIntent.addCategory(String.valueOf(paramPushMetaInfo.getNotifyId()));
-            localPendingIntent = PendingIntent.getService(paramContext, 0, localIntent, PendingIntent.FLAG_UPDATE_CURRENT);
         }
-        return localPendingIntent;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return PendingIntent.getForegroundService(paramContext, 0, localIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        } else {
+            return PendingIntent.getService(paramContext, 0, localIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        }
     }
 
     /**

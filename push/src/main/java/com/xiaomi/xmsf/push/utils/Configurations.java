@@ -3,14 +3,15 @@ package com.xiaomi.xmsf.push.utils;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Build;
+import android.util.Pair;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.documentfile.provider.DocumentFile;
 
 import com.elvishew.xlog.Logger;
 import com.elvishew.xlog.XLog;
+import com.google.gson.GsonBuilder;
 import com.xiaomi.xmpush.thrift.PushMetaInfo;
 
 import org.json.JSONArray;
@@ -35,10 +36,10 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import top.trumeet.common.Constants;
+import top.trumeet.common.utils.Utils;
 
 public class Configurations {
-    private static Logger logger = XLog.tag(Configurations.class.getSimpleName()).build();
+    private static final Logger logger = XLog.tag(Configurations.class.getSimpleName()).build();
 
     public class PackageConfig {
         public static final String KEY_META_INFO = "metaInfo";
@@ -164,18 +165,20 @@ public class Configurations {
             if (!matcher.find()) {
                 return true;
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Set<String> groups = getNamedGroupCandidates(regex);
-                for (String name : groups) {
-                    matchGroup.put(name, matcher.group(name));
-                }
+            List<String> groups = getNamedGroupCandidates(regex);
+            for (int i = 0; i < groups.size(); ++i) {
+                String name = groups.get(i);
+                matchGroup.put(name,
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
+                                matcher.group(name) :
+                                matcher.group(i + 1));
             }
             return false;
         }
 
-        private Set<String> getNamedGroupCandidates(String regex) {
-            Set<String> namedGroups = new HashSet<>();
-            Matcher m = Pattern.compile("\\(\\?<([a-zA-Z][a-zA-Z0-9]*)>").matcher(regex);
+        private ArrayList<String> getNamedGroupCandidates(String regex) {
+            ArrayList<String> namedGroups = new ArrayList<>();
+            Matcher m = Pattern.compile("(?<!\\\\)\\(\\?<([a-zA-Z][a-zA-Z0-9]*)>").matcher(regex);
             while (m.find()) {
                 namedGroups.add(m.group(1));
             }
@@ -184,7 +187,7 @@ public class Configurations {
     }
 
     private String version;
-    private Map<String, List<PackageConfig>> packageConfigs = new HashMap<>();
+    private Map<String, List<Object>> packageConfigs = new HashMap<>();
 
     private static Configurations instance = null;
 
@@ -209,24 +212,77 @@ public class Configurations {
             if (context == null || treeUri == null) {
                 break;
             }
-            DocumentFile documentFile = DocumentFile.fromTreeUri(context, treeUri);
-            if (documentFile == null) {
-                break;
+            List<Pair<DocumentFile, JSONException>> exceptions = new ArrayList<>();
+            List<DocumentFile> loadedFiles = new ArrayList<>();
+            parseDirectory(context, treeUri, exceptions, loadedFiles);
+
+            if (!loadedFiles.isEmpty()) {
+                StringBuilder loadedList = new StringBuilder("loaded configuration list:");
+                for (DocumentFile file : loadedFiles) {
+                    loadedList.append('\n');
+                    loadedList.append(file.getName());
+                }
+                Utils.makeText(context, loadedList, Toast.LENGTH_SHORT);
             }
-            DocumentFile configs = documentFile.findFile(Constants.CONFIGURATIONS_FILE_NAME);
-            if (configs == null) {
-                break;
-            }
-            String json = readTextFromUri(context, configs.getUri());
-            try {
-                parse(json);
-            } catch (JSONException e) {
-                e.printStackTrace();
-                Toast.makeText(context, e.toString(), Toast.LENGTH_LONG).show();
+            if (!exceptions.isEmpty()) {
+                for (Pair<DocumentFile, JSONException> pair : exceptions) {
+                    DocumentFile file = pair.first;
+                    JSONException e = pair.second;
+                    e.printStackTrace();
+
+                    StringBuilder errmsg = new StringBuilder(e.toString());
+                    Pattern pattern = Pattern.compile(" character (\\d+) of ");
+                    Matcher matcher = pattern.matcher(errmsg.toString());
+                    if (matcher.find()) {
+                        int pos = Integer.parseInt(matcher.group(1));
+                        String json = readTextFromUri(context, file.getUri());
+                        String[] beforeErr = json.substring(0, pos).split("\n");
+                        int errorLine = beforeErr.length;
+                        int errorColumn = beforeErr[beforeErr.length - 1].length();
+                        String exceptionMessage = errmsg.substring(0, matcher.start())
+                                .replace("org.json.JSONException: ", "")
+                                .replaceFirst("(after )(.*)( at)", "$1\"$2\"$3");
+                        errmsg = new StringBuilder(String.format("%s line %d column %d", exceptionMessage, errorLine, errorColumn));
+
+                        String[] jsonLine = json.split("\n");
+                        jsonLine[errorLine - 1] = jsonLine[errorLine - 1].substring(0, errorColumn - 1) +
+                                "┋" +
+                                jsonLine[errorLine - 1].substring(errorColumn - 1);
+                        for (int i = Math.max(0, errorLine - 2); i <= Math.min(jsonLine.length - 1, errorLine); ++i) {
+                            errmsg.append('\n');
+                            errmsg.append(i + 1);
+                            errmsg.append(": ");
+                            errmsg.append(jsonLine[i]);
+                        }
+                    }
+                    errmsg.insert(0, file.getName() + "\n");
+                    Utils.makeText(context, errmsg.toString(), Toast.LENGTH_LONG);
+                }
                 break;
             }
             return true;
         } while (false);
+        return false;
+    }
+
+    private boolean parseDirectory(Context context, Uri treeUri, List<Pair<DocumentFile, JSONException>> exceptions, List<DocumentFile> loadedFiles) {
+        DocumentFile documentFile = DocumentFile.fromTreeUri(context, treeUri);
+        if (documentFile == null) {
+            return true;
+        }
+        DocumentFile[] files = documentFile.listFiles();
+        for (DocumentFile file : files) {
+            if (!"application/json".equals(file.getType())) {
+                continue;
+            }
+            String json = readTextFromUri(context, file.getUri());
+            try {
+                parse(json);
+                loadedFiles.add(file);
+            } catch (JSONException e) {
+                exceptions.add(new Pair<>(file, e));
+            }
+        }
         return false;
     }
 
@@ -243,13 +299,12 @@ public class Configurations {
     }
 
     @NonNull
-    private ArrayList<PackageConfig> parseConfigs(JSONArray configsObj) throws JSONException {
-        ArrayList<PackageConfig> configs = new ArrayList<>();
+    private ArrayList<Object> parseConfigs(JSONArray configsObj) throws JSONException {
+        ArrayList<Object> configs = new ArrayList<>();
         for (int i = 0; i < configsObj.length(); ++i) {
             Object config = configsObj.get(i);
             if (config instanceof String) {
-                List<PackageConfig> existConfigs = this.packageConfigs.get(config.toString());
-                configs.addAll(existConfigs);
+                configs.add(config);
             } else {
                 configs.add(parseConfig(configsObj.getJSONObject(i)));
             }
@@ -282,13 +337,14 @@ public class Configurations {
         try (InputStream inputStream = context.getContentResolver().openInputStream(uri);
              BufferedReader reader = new BufferedReader(
                      new InputStreamReader(Objects.requireNonNull(inputStream)))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                stringBuilder.append(line);
+            char[] buffer = new char[1024];
+            int len;
+            while ((len = reader.read(buffer)) != -1) {
+                stringBuilder.append(buffer, 0, len);
             }
         } catch (Exception e) {
             e.printStackTrace();
-            Toast.makeText(context, e.toString(), Toast.LENGTH_LONG).show();
+            Utils.makeText(context, e.toString(), Toast.LENGTH_LONG);
         }
         return stringBuilder.toString();
     }
@@ -298,25 +354,40 @@ public class Configurations {
         String[] checkPkgs = new String[]{"^", packageName, "$"};
         Set<String> operations = new HashSet<>();
         for (String pkg : checkPkgs) {
-            List<PackageConfig> configs = packageConfigs.get(pkg);
-            logger.i("package: " + packageName + ", config count: " + (configs == null ? 0 : configs.size()));
+            List<Object> configs = packageConfigs.get(pkg);
+            logger.d("package: " + packageName + ", config count: " + (configs == null ? 0 : configs.size()));
             boolean stop = doHandle(metaInfo, configs, operations);
             if (stop) {
                 return operations;
-            };
+            }
         }
         return operations;
     }
 
-    @Nullable
-    private boolean doHandle(PushMetaInfo metaInfo, List<PackageConfig> configs, Set<String> operations)
+    private boolean doHandle(PushMetaInfo metaInfo, List<Object> configs, Set<String> operations)
+            throws JSONException, NoSuchFieldException, InvocationTargetException, IllegalAccessException, NoSuchMethodException {
+        return doHandle(metaInfo, configs, operations, new ArrayList<>());
+    }
+
+    private boolean doHandle(PushMetaInfo metaInfo, List<Object> configs, Set<String> operations, List<Object> matched)
             throws NoSuchFieldException, IllegalAccessException, JSONException, NoSuchMethodException, InvocationTargetException {
-        if (configs != null) {
-            for (PackageConfig config : configs) {
-                if (config.match(metaInfo)) {
-                    config.replace(metaInfo);
-                    operations.addAll(config.operation);
-                    if (config.stop) {
+        if (configs != null && !matched.contains(configs)) {
+            matched.add(configs);
+            for (Object configItem : configs) {
+                if (configItem instanceof PackageConfig) {
+                    PackageConfig config = (PackageConfig) configItem;
+                    if (config.match(metaInfo)) {
+                        logger.d(new GsonBuilder().disableHtmlEscaping().create().toJson(config));
+                        config.replace(metaInfo);
+                        operations.addAll(config.operation);
+                        if (config.stop) {
+                            return true;
+                        }
+                    }
+                } else {
+                    List<Object> refConfigs = packageConfigs.get(configItem);
+                    boolean stop = doHandle(metaInfo, refConfigs, operations);
+                    if (stop) {
                         return true;
                     }
                 }

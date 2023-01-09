@@ -118,7 +118,10 @@ Please grant the <b>Run in the background or wake up</b> permissions.
     ]]></string>
 
     <string name="wizard_title_stats_permission">Usage stats</string>
-    <string name="wizard_title_stats_permission_text">You need to grant "Usage" permission or you will not be able to receive notifications.</string>
+    <string name="wizard_title_stats_permission_text">You need to grant \"Usage stats\" permission or you will not be able to receive notifications.</string>
+
+    <string name="wizard_title_alert_window_permission">Display over other apps</string>
+    <string name="wizard_title_alert_window_text">You need to grant \"Display over other apps\" permission or you will not be able to auto open app by configuration.</string>
 
     <string name="wizard_descr_finish">Everything is ready. Enjoy!</string>
 
@@ -155,6 +158,7 @@ Please grant the <b>Run in the background or wake up</b> permissions.
     <!-- For Long ago format -->
     <string name="date_format_long">%1$s</string>
 
+    <string name="action_edit_permission_title">Edit Permissions (Save by ----></string>
     <string name="action_edit_permission">Edit Permissions</string>
     <string name="action_notify">notify</string>
 
