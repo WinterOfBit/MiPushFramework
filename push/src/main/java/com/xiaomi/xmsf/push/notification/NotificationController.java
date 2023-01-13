@@ -19,7 +19,9 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Build;
@@ -27,6 +29,7 @@ import android.os.Bundle;
 import android.service.notification.StatusBarNotification;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat;
 import androidx.core.graphics.ColorUtils;
@@ -36,10 +39,12 @@ import com.elvishew.xlog.Logger;
 import com.elvishew.xlog.XLog;
 import com.nihility.notification.NotificationManagerEx;
 import com.xiaomi.push.service.MIPushNotificationHelper;
+import com.xiaomi.push.service.NotificationIconHelper;
 import com.xiaomi.xmpush.thrift.PushMetaInfo;
 import com.xiaomi.xmpush.thrift.XmPushActionContainer;
 import com.xiaomi.xmsf.ManageSpaceActivity;
 import com.xiaomi.xmsf.R;
+import com.xiaomi.xmsf.push.utils.IconConfigurations;
 import com.xiaomi.xmsf.utils.ColorUtil;
 
 import java.lang.reflect.InvocationTargetException;
@@ -49,6 +54,7 @@ import java.util.Map;
 
 import top.trumeet.common.cache.ApplicationNameCache;
 import top.trumeet.common.cache.IconCache;
+import top.trumeet.common.utils.ImgUtils;
 
 /**
  * @author Trumeet
@@ -64,6 +70,9 @@ public class NotificationController {
     private static final String ID_GROUP_APPLICATIONS = "applications";
 
     public static final String CHANNEL_WARN = "warn";
+
+    private static final String NOTIFICATION_LARGE_ICON_URI = "notification_large_icon_uri";
+    private static final String EXTRA_ROUND_LARGE_ICON = "__mi_push_round_large_icon";
 
     public static NotificationManagerEx getNotificationManagerEx() {
         return NotificationManagerEx.INSTANCE;
@@ -204,14 +213,40 @@ public class NotificationController {
         notificationBuilder.addExtras(extras);
 
         // Set small icon
-        NotificationController.processSmallIcon(context, packageName, notificationBuilder);
+        processIcon(context, packageName, notificationBuilder);
+
+        String iconUri = getExtraField(metaInfo.getExtra(), NOTIFICATION_LARGE_ICON_URI, null);
+        Bitmap largeIcon = IconCache.getInstance().getBitmap(context, iconUri,
+                NotificationController::getBitmapFromUri);
+        if (largeIcon != null) {
+            if (getExtraField(metaInfo.getExtra(), EXTRA_ROUND_LARGE_ICON, null) != null) {
+                largeIcon = ImgUtils.trimImgToCircle(largeIcon, Color.TRANSPARENT);
+            }
+            notificationBuilder.setLargeIcon(largeIcon);
+        }
 
         String subText = getExtraField(metaInfo.getExtra(), EXTRA_SUB_TEXT, null);
-        NotificationController.buildExtraSubText(context, packageName, notificationBuilder, subText);
+        buildExtraSubText(context, packageName, notificationBuilder, subText);
 
         Notification notification = notificationBuilder.build();
         getNotificationManagerEx().notify(packageName, null, notificationId, notification);
         return notification;
+    }
+
+    @Nullable
+    private static Bitmap getBitmapFromUri(Context context, String iconUri) {
+        Bitmap bitmap = null;
+        if (iconUri != null) {
+            if (iconUri.startsWith("http")) {
+                NotificationIconHelper.GetIconResult result = NotificationIconHelper.getIconFromUrl(context, iconUri);
+                if (result != null) {
+                    bitmap = result.bitmap;
+                }
+            } else {
+                bitmap = NotificationIconHelper.getIconFromUri(context, iconUri);
+            }
+        }
+        return bitmap;
     }
 
     private static void setTargetPackage(Notification notification, String packageName) {
@@ -268,7 +303,7 @@ public class NotificationController {
     }
 
 
-    public static void processSmallIcon(Context context, String packageName, NotificationCompat.Builder notificationBuilder) {
+    public static void processIcon(Context context, String packageName, NotificationCompat.Builder notificationBuilder) {
         notificationBuilder.setSmallIcon(R.drawable.ic_notifications_black_24dp);
 
         // refer: https://dev.mi.com/console/doc/detail?pId=2625#_5_0
@@ -285,13 +320,31 @@ public class NotificationController {
             notificationBuilder.setLargeIcon(BitmapFactory.decodeResource(pkgContext.getResources(), largeIconId));
         }
 
+        notificationBuilder.setColor(getIconColor(context, packageName));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            IconConfigurations.IconConfig iconConfig = IconConfigurations.getInstance().get(packageName);
+            if (iconConfig != null && iconConfig.isEnabled && iconConfig.isEnabledAll) {
+                Bitmap iconBitmap = iconConfig.bitmap();
+                if (iconBitmap != null) {
+                    notificationBuilder.setSmallIcon(IconCompat.createWithBitmap(iconBitmap));
+                    notificationBuilder.setColor(iconConfig.color());
+                    return;
+                }
+            }
+
             if (smallIconId > 0) {
                 notificationBuilder.setSmallIcon(IconCompat.createWithResource(pkgContext, smallIconId));
                 return;
             }
             if (largeIconId > 0) {
                 notificationBuilder.setSmallIcon(IconCompat.createWithResource(pkgContext, largeIconId));
+                return;
+            }
+
+            Bitmap iconBitmap = iconConfig == null ? null : iconConfig.bitmap();
+            if (iconBitmap != null && iconConfig.isEnabled) {
+                notificationBuilder.setSmallIcon(IconCompat.createWithBitmap(iconBitmap));
+                notificationBuilder.setColor(iconConfig.color());
                 return;
             }
 
@@ -304,19 +357,20 @@ public class NotificationController {
     }
 
     public static void buildExtraSubText(Context context, String packageName, NotificationCompat.Builder localBuilder, CharSequence text) {
+        if ("".equals(text)) {
+            localBuilder.setSubText(null);
+            return;
+        }
         if (text == null) {
             text = ApplicationNameCache.getInstance().getAppName(context, packageName);
         }
-        int color = getIconColor(context, packageName);
+        int color = localBuilder.getColor();
         if (color == Notification.COLOR_DEFAULT) {
             localBuilder.setSubText(text);
             return;
         }
-        localBuilder.setColor(color);
         CharSequence subText = ColorUtil.createColorSubtext(text, color);
-        if (subText != null) {
-            localBuilder.setSubText(subText);
-        }
+        localBuilder.setSubText(subText);
     }
 
     private static int getIconId(Context context, String packageName, String resourceName) {

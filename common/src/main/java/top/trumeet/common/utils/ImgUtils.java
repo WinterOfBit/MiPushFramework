@@ -6,7 +6,8 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
-import android.util.Log;
+
+import androidx.annotation.NonNull;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -24,7 +25,7 @@ public class ImgUtils {
 
     private static int NUM_256 = 256;
 
-    private static Bitmap trimImgToCircle(Bitmap bitmap, int color) {
+    public static Bitmap trimImgToCircle(Bitmap bitmap, int color) {
         int width = bitmap.getWidth();
         int height = bitmap.getHeight();
         int[] pixels = new int[width * height];
@@ -38,14 +39,14 @@ public class ImgUtils {
         return newBmp;
     }
 
-    private static void trimImgToCircle(int color, int width, int height, int[] pixels, int rExpand) {
-
-        int r = (width < height ? width : height) / 2 + rExpand;
+    public static void trimImgToCircle(int color, int width, int height, int[] pixels, int rExpand) {
+        double r = Math.min(width, height) / 2.0 + rExpand;
 
         for (int i = 0; i < height; i++) {
             for (int j = 0; j < width; j++) {
-
-                if ((i - width / 2) * (i - width / 2) + (j - height / 2) * (j - height / 2) > r * r) {
+                double a = (i - width / 2.0);
+                double b = (j - height / 2.0);
+                if (a * a + b * b > r * r) {
                     pixels[width * i + j] = color;
                 }
 
@@ -61,9 +62,6 @@ public class ImgUtils {
         int[] pixels = new int[width * height];
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
 
-        int whiteCnt = 0;
-        int tsCnt = 0;
-
         for (int i = 0; i < height; i++) {
             for (int j = 0; j < width; j++) {
                 int dot = pixels[width * i + j];
@@ -74,15 +72,92 @@ public class ImgUtils {
 
                 if (gray > calculateThreshold) {
                     pixels[width * i + j] = Color.TRANSPARENT;
-                    tsCnt++;
                 } else {
                     pixels[width * i + j] = Color.WHITE;
-                    whiteCnt++;
                 }
             }
         }
 
-        trimImgToCircle(Color.TRANSPARENT, width, height, pixels, 5);
+        trimImgToCircle(Color.TRANSPARENT, width, height, pixels, 0);
+
+        invertColorIfWhitePredominate(width, height, pixels);
+
+        trimImgToCircle(Color.TRANSPARENT, width, height, pixels, 0);
+
+        //todo use bwareaopen
+        denoiseWhitePoint(width, height, pixels, 3);
+
+        return cropTransparent(width, height, pixels);
+    }
+
+    @NonNull
+    private static Bitmap cropTransparent(int width, int height, int[] pixels) {
+        int topPadding = height;
+        int leftPadding = width;
+        int rightPadding = width;
+        int bottomPadding = height;
+
+
+        for (int h = 0; h < height; h++) {
+            for (int w = 0; w < width; w++) {
+                if (pixels[width * h + w] != Color.TRANSPARENT) {
+                    topPadding = Math.min(topPadding, h);
+                    leftPadding = Math.min(leftPadding, w);
+                    rightPadding = Math.min(rightPadding, width - 1 - w);
+                    bottomPadding = Math.min(bottomPadding, height - 1 - h);
+
+                }
+            }
+        }
+
+        int verticalPadding = bottomPadding + topPadding;
+        int horizontalPadding = leftPadding + rightPadding;
+        int diff = verticalPadding - horizontalPadding;
+        if (verticalPadding > horizontalPadding) {
+            bottomPadding -= (diff / 2);
+            topPadding -= (diff / 2);
+
+            bottomPadding = Math.max(bottomPadding, 0);
+            topPadding = Math.max(topPadding, 0);
+
+        } else if (verticalPadding < horizontalPadding) {
+            leftPadding += (diff / 2);
+            rightPadding += (diff / 2);
+            leftPadding = Math.max(leftPadding, 0);
+            rightPadding = Math.max(rightPadding, 0);
+        }
+
+
+        int cropHeight = height - bottomPadding - topPadding;
+        int cropWidth = width - leftPadding - rightPadding;
+
+        int padding = (cropHeight + cropWidth) / 16;
+
+        int[] newPix = new int[cropWidth * cropHeight];
+
+        int i = 0;
+        for (int h = topPadding; h < topPadding + cropHeight; h++) {
+            for (int w = leftPadding; w < leftPadding + cropWidth; w++) {
+                newPix[i++] = pixels[width * h + w];
+            }
+        }
+
+        Bitmap newBmp = Bitmap.createBitmap(cropWidth + padding * 2, cropHeight + padding * 2, Bitmap.Config.ARGB_8888);
+        newBmp.setPixels(newPix, 0, cropWidth, padding, padding, cropWidth, cropHeight);
+
+        return newBmp;
+    }
+
+    private static void invertColorIfWhitePredominate(int width, int height, int[] pixels) {
+        int whiteCnt = 0;
+        int tsCnt = 0;
+        for (int color : pixels) {
+            if (color == Color.TRANSPARENT) {
+                tsCnt++;
+            } else {
+                whiteCnt++;
+            }
+        }
 
         if (whiteCnt > tsCnt) {
             //revert WHITE and TRANSPARENT
@@ -97,113 +172,11 @@ public class ImgUtils {
                 }
             }
         }
-
-        trimImgToCircle(Color.TRANSPARENT, width, height, pixels, 5);
-
-        //todo use bwareaopen
-        denoiseWhitePoint(width, height, pixels, 3);
-
-        int top = 0;
-        int left = 0;
-        int right = 0;
-        int bottom = 0;
-
-        for (int h = 0; h < bitmap.getHeight(); h++) {
-            boolean holdBlackPix = false;
-            for (int w = 0; w < bitmap.getWidth(); w++) {
-                if (pixels[width * h + w] != Color.TRANSPARENT) {
-                    holdBlackPix = true;
-                    break;
-                }
-            }
-
-            if (holdBlackPix) {
-                break;
-            }
-            top++;
-        }
-
-        for (int w = 0; w < bitmap.getWidth(); w++) {
-            boolean holdBlackPix = false;
-            for (int h = 0; h < bitmap.getHeight(); h++) {
-                if (pixels[width * h + w] != Color.TRANSPARENT) {
-                    holdBlackPix = true;
-                    break;
-                }
-            }
-            if (holdBlackPix) {
-                break;
-            }
-            left++;
-        }
-
-        for (int w = bitmap.getWidth() - 1; w >= 0; w--) {
-            boolean holdBlackPix = false;
-            for (int h = 0; h < bitmap.getHeight(); h++) {
-                if (pixels[width * h + w] != Color.TRANSPARENT) {
-                    holdBlackPix = true;
-                    break;
-                }
-            }
-            if (holdBlackPix) {
-                break;
-            }
-            right++;
-        }
-
-        for (int h = bitmap.getHeight() - 1; h >= 0; h--) {
-            boolean holdBlackPix = false;
-            for (int w = 0; w < bitmap.getWidth(); w++) {
-                if (pixels[width * h + w] != Color.TRANSPARENT) {
-                    holdBlackPix = true;
-                    break;
-                }
-            }
-            if (holdBlackPix) {
-                break;
-            }
-            bottom++;
-        }
-
-        int diff = (bottom + top) - (left + right);
-        if (diff > 0) {
-            bottom -= (diff / 2);
-            top -= (diff / 2);
-
-            bottom = bottom < 0 ? 0 : bottom;
-            top = top < 0 ? 0 : top;
-
-        } else if (diff < 0) {
-            left += (diff / 2);
-            right += (diff / 2);
-            left = left < 0 ? 0 : left;
-            right = right < 0 ? 0 : right;
-        }
-
-
-        int cropHeight = bitmap.getHeight() - bottom - top;
-        int cropWidth = bitmap.getWidth() - left - right;
-
-        int padding = (cropHeight + cropWidth) / 16;
-
-        int[] newPix = new int[cropWidth * cropHeight];
-
-        int i = 0;
-        for (int h = top; h < top + cropHeight; h++) {
-            for (int w = left; w < left + cropWidth; w++) {
-                newPix[i++] = pixels[width * h + w];
-            }
-        }
-
-        Bitmap newBmp = Bitmap.createBitmap(cropWidth + padding * 2, cropHeight + padding * 2, Bitmap.Config.ARGB_8888);
-        newBmp.setPixels(newPix, 0, cropWidth, padding, padding, cropWidth, cropHeight);
-
-        return newBmp;
     }
 
     private static void denoiseWhitePoint(int width, int height, int[] pixels, int exThre) {
-        for (int i = 1; i < height - 1; i++) {
-            for (int j = 1; j < width - 1; j++) {
+        for (int i = 1; i < height; i++) {
+            for (int j = 1; j < width; j++) {
                 int[] dots = new int[]{
                         getPixel(width, pixels, i - 1, j - 1),
                         getPixel(width, pixels, i - 1, j),
@@ -226,15 +199,21 @@ public class ImgUtils {
                     }
                 }
 
-                if (trCnt > (dots.length - exThre)) {
+                if (trCnt + exThre > dots.length) {
                     pixels[width * i + j] = Color.TRANSPARENT;
                 }
             }
         }
     }
 
-    private static int getPixel(int width, int[] pixels, int i, int j) {
-        return pixels[width * i + j];
+    private static int getPixel(int width, int[] pixels, int h, int w) {
+        if (w >= width) {
+            return Color.TRANSPARENT;
+        }
+        if (width * h + w >= pixels.length) {
+            return Color.TRANSPARENT;
+        }
+        return pixels[width * h + w];
     }
 
     private static void getGreyHistogram(Bitmap bitmap, int[] histogram) {

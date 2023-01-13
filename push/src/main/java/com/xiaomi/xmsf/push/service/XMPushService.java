@@ -13,7 +13,9 @@ import com.elvishew.xlog.XLog;
 import com.xiaomi.push.service.PushConstants;
 import com.xiaomi.push.service.PushServiceMain;
 import com.xiaomi.xmsf.R;
+import com.xiaomi.xmsf.push.control.PushControllerUtils;
 import com.xiaomi.xmsf.push.utils.Configurations;
+import com.xiaomi.xmsf.push.utils.IconConfigurations;
 import com.xiaomi.xmsf.utils.ConfigCenter;
 
 import top.trumeet.common.Constants;
@@ -35,9 +37,13 @@ public class XMPushService extends IntentService {
     @Override
     protected void onHandleIntent(Intent intent) {
         if (Constants.CONFIGURATIONS_UPDATE_ACTION.equals(intent.getAction())) {
-            boolean success = Configurations.getInstance().init(this,
-                    ConfigCenter.getInstance().getConfigurationDirectory(this));
-            Utils.makeText(this, "configurations loaded: " + success, Toast.LENGTH_SHORT);
+            if (!PushControllerUtils.isAppMainProc(this)) {
+                boolean success = Configurations.getInstance().init(this,
+                        ConfigCenter.getInstance().getConfigurationDirectory(this)) &&
+                        IconConfigurations.getInstance().init(this,
+                                ConfigCenter.getInstance().getConfigurationDirectory(this));
+                Utils.makeText(this, "configurations loaded: " + success, Toast.LENGTH_SHORT);
+            }
             return;
         }
 

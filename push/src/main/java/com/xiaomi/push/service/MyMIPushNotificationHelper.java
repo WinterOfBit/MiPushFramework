@@ -30,6 +30,7 @@ import com.xiaomi.xmsf.BuildConfig;
 import com.xiaomi.xmsf.R;
 import com.xiaomi.xmsf.push.notification.NotificationController;
 import com.xiaomi.xmsf.push.utils.Configurations;
+import com.xiaomi.xmsf.push.utils.IconConfigurations;
 import com.xiaomi.xmsf.utils.ConfigCenter;
 
 import java.net.MalformedURLException;
@@ -37,6 +38,8 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import top.trumeet.common.Constants;
 import top.trumeet.common.db.RegisteredApplicationDb;
@@ -61,6 +64,8 @@ public class MyMIPushNotificationHelper {
 
     private static boolean tryLoadConfigurations = false;
 
+    private static ExecutorService executorService = Executors.newFixedThreadPool(3);
+
     /**
      * @see MIPushNotificationHelper#notifyPushMessage
      */
@@ -81,7 +86,9 @@ public class MyMIPushNotificationHelper {
                 boolean success = false;
                 try {
                     success = Configurations.getInstance().init(context,
-                            ConfigCenter.getInstance().getConfigurationDirectory(context));
+                            ConfigCenter.getInstance().getConfigurationDirectory(context)) &&
+                            IconConfigurations.getInstance().init(context,
+                                    ConfigCenter.getInstance().getConfigurationDirectory(context));
                 } catch (Exception e) {
                     Utils.makeText(context, e.toString(), Toast.LENGTH_LONG);
                 }
@@ -95,7 +102,7 @@ public class MyMIPushNotificationHelper {
                     wakeScreen(context, packageName);
                 }
                 if (!operations.contains(Configurations.PackageConfig.OPERATION_IGNORE)) {
-                    doNotifyPushMessage(context, container, decryptedContent);
+                    executorService.execute(() -> doNotifyPushMessage(context, container, decryptedContent));
                 }
                 if (operations.contains(Configurations.PackageConfig.OPERATION_OPEN)) {
                     MyPushMessageHandler.startService(context, container, decryptedContent);
@@ -131,7 +138,7 @@ public class MyMIPushNotificationHelper {
             NotificationCompat.BigTextStyle style = new NotificationCompat.BigTextStyle();
             style.bigText(description);
             style.setBigContentTitle(title);
-            style.setSummaryText(description);
+//            style.setSummaryText(description);
             notificationBuilder.setStyle(style);
         }
 
@@ -235,7 +242,6 @@ public class MyMIPushNotificationHelper {
                 PendingIntent pendingIntent = PendingIntent.getActivity(xmPushService, 0, sdkIntentJump, PendingIntent.FLAG_UPDATE_CURRENT);
                 localBuilder.addAction(new NotificationCompat.Action(i, "SDK Intent", pendingIntent));
             }
-
         }
     }
 
@@ -406,24 +412,26 @@ public class MyMIPushNotificationHelper {
         if (paramPushMetaInfo == null) {
             return null;
         }
-        PendingIntent localPendingIntent;
 
+        Intent localIntent;
         if (isBusinessMessage(paramXmPushActionContainer)) {
-            Intent localIntent = new Intent();
+            localIntent = new Intent();
             localIntent.setComponent(new ComponentName("com.xiaomi.xmsf", "com.xiaomi.mipush.sdk.PushMessageHandler"));
             localIntent.putExtra(PushConstants.MIPUSH_EXTRA_PAYLOAD, paramArrayOfByte);
             localIntent.putExtra(FROM_NOTIFICATION, true);
             localIntent.addCategory(String.valueOf(paramPushMetaInfo.getNotifyId()));
-            localPendingIntent = PendingIntent.getService(paramContext, 0, localIntent, PendingIntent.FLAG_UPDATE_CURRENT);
         } else {
-            Intent localIntent = new Intent("com.xiaomi.mipush.RECEIVE_MESSAGE");
+            localIntent = new Intent(PushConstants.MIPUSH_ACTION_NEW_MESSAGE);
             localIntent.setComponent(new ComponentName(paramXmPushActionContainer.packageName, "com.xiaomi.mipush.sdk.PushMessageHandler"));
             localIntent.putExtra(PushConstants.MIPUSH_EXTRA_PAYLOAD, paramArrayOfByte);
             localIntent.putExtra(FROM_NOTIFICATION, true);
             localIntent.addCategory(String.valueOf(paramPushMetaInfo.getNotifyId()));
-            localPendingIntent = PendingIntent.getService(paramContext, 0, localIntent, PendingIntent.FLAG_UPDATE_CURRENT);
         }
-        return localPendingIntent;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return PendingIntent.getForegroundService(paramContext, 0, localIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        } else {
+            return PendingIntent.getService(paramContext, 0, localIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        }
     }
 
     /**
